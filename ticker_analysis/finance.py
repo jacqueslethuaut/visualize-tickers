@@ -7,6 +7,10 @@ File: finance.py
 import pandas_datareader.data as pdr
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.graph_objects as go
+
+from alpha_vantage.timeseries import TimeSeries
+from plotly.subplots import make_subplots
 
 def get_history(ticker, period, start, end, key):
     """
@@ -42,10 +46,10 @@ def get_history_and_plot(ticker, period, start, end, key):
 
     fig = go.Figure(data=[go.Candlestick(
         x=data.index,
-        open=data['Open'],
-        high=data['High'],
-        low=data['Low'],
-        close=data['Close'],
+        open=data['open'],
+        high=data['high'],
+        low=data['low'],
+        close=data['close'],
         increasing_line_color= 'cyan', decreasing_line_color= 'gray'
     )])
 
@@ -59,3 +63,53 @@ def get_history_and_plot(ticker, period, start, end, key):
     
     return data
 
+
+def get_history_plot(ticker, period, key):
+    """
+     Get history plot for ticker. This function is used to plot historical trading data for a given ticker
+     
+     @param ticker - ticker to get data for
+     @param period - period to get data for e. g.
+     @param key - time series key to use
+     
+     @return subplots of candlestick plot with data
+    """
+    ts = TimeSeries(key=key, output_format='pandas')
+
+    match period:
+        case 'av-daily-adjusted':
+            data, metadata = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
+        case 'av-daily':
+            data, metadata = ts.get_daily(symbol=ticker, outputsize='full')
+
+    data['return'] = data['4. close'].pct_change()
+    data['volatility'] = data['return'].rolling(21).std()
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.02)
+
+    fig.add_trace(go.Candlestick(
+        x=data.index,
+        open=data['1. open'],
+        high=data['2. high'],
+        low=data['3. low'],
+        close=data['4. close'],
+        increasing_line_color= 'cyan', decreasing_line_color= 'gray',
+        name='AAPL'
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=data.index, 
+        y=data['volatility'], 
+        mode='lines', 
+        line=dict(width=1.5),
+        name='Volatility'
+    ), row=2, col=1)
+
+    fig.update_layout(
+        xaxis_rangeslider_visible=True,
+        title='AAPL : Daily Close Prices and Volatility',
+    )
+
+    fig.show()
+    return data
