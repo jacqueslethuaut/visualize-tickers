@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import dash
 
 from dash.dependencies import Input, Output
-from alpha_vantage.timeseries import TimeSeries
+
 from jupyter_dash import JupyterDash
 from dash import html
 from dash import dcc
@@ -96,26 +96,13 @@ class FinanceApp:
             
             return go.Figure(), 100, [0, 100]
         
-    
-    def get_stock_data(self, symbol, period, api_key):
-        ts = TimeSeries(key=api_key, output_format='pandas')
-
-        data = None
-        match period:
-            case 'daily':
-                data, metadata = ts.get_daily(symbol=symbol, outputsize='full')
-            case 'daily_adjusted':
-                data, metadata = ts.get_daily_adjusted(symbol=symbol, outputsize='full')
-
-        if data is not None:
-            data['return'] = data['4. close'].pct_change()
-            data['volatility'] = data['return'].rolling(21).std() * np.sqrt(252)  # annualized volatility
-
-        self.data = data
-        self.app.layout.children[1].children[0].max = len(data.index)
-        self.app.layout.children[1].children[0].value = [0, len(data.index)]
-        return data
-
 
     def show(self):
         self.app.run_server(mode='inline')
+        
+    
+    def load_stock_data(self, data):
+        self.data = data
+        self.app.layout.children[1].children[0].max = len(data.index)
+        self.app.layout.children[1].children[0].value = [0, len(data.index)]
+    
