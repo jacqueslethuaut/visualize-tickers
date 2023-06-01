@@ -1,4 +1,8 @@
-# finance.py
+"""
+Author: Jacques LE THUAUT
+Title: Implementation of a dash wrapper
+File: finance.py
+"""
 
 import numpy as np
 import plotly.graph_objects as go

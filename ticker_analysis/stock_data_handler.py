@@ -1,5 +1,8 @@
-# stock_data_handler
-
+"""
+Author: Jacques LE THUAUT
+Title: Implementation of a stock data hadler based on alpha_vantage and pickle for caching
+File: stock_data_handler.py
+"""
 import pandas as pd
 import numpy as np
 import pickle
