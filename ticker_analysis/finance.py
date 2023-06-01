@@ -1,115 +1,121 @@
-"""
-Author: Jacques Le Thuaut
-Title: Implementation of pandas_datareader library
-File: finance.py
-"""
+# finance.py
 
-import pandas_datareader.data as pdr
-import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
-import plotly.graph_objects as go
+import dash
 
+from dash.dependencies import Input, Output
 from alpha_vantage.timeseries import TimeSeries
-from plotly.subplots import make_subplots
+from jupyter_dash import JupyterDash
+from dash import html
+from dash import dcc
+from dash import callback_context
 
-def get_history(ticker, period, start, end, key):
-    """
-     Get historical data for a ticker. This is a wrapper around pdr. DataReader. The API key is required to access the API
-     
-     @param ticker - ticker to get historical data for
-     @param period - period of data to get in seconds ( 1 minute by default )
-     @param start - start time of historical data in unix timestamp format ( YYYY - MM - DD HH : MM : SS )
-     @param end - end time of historical data in unix timestamp format ( YYYY - MM - DD HH : MM : SS )
-     @param key - API key to access the API ( string )
-     
-     @return PDR data reader ( instance of pdr. DataReader ) that can be used to read historical data
-    """
+
+class FinanceApp:
+    def __init__(self):
+        self.app = JupyterDash('Finance App')
+        self.data = None
+        self.zoom_factor = 0.2  # Adjust this to change the amount of zoom per click
+
+        # Define the layout
+        self.app.layout = html.Div([
+            dcc.Graph(
+                id='graph',
+                config={'displayModeBar': False}
+            ),
+            html.Div([
+                dcc.RangeSlider(
+                    id='slider',
+                    min=0,
+                    max=100,
+                    value=[0, 100]
+                )
+            ]),
+            html.Button('Zoom In', id='zoom-in-button'),
+            html.Button('Zoom Out', id='zoom-out-button')
+        ])
+
+        @self.app.callback(
+            Output('graph', 'figure'),
+            Output('slider', 'max'),
+            Output('slider', 'value'),
+            Input('slider', 'value'),
+            Input('zoom-in-button', 'n_clicks'),
+            Input('zoom-out-button', 'n_clicks')
+        )
+        def update_figure(selected_range, zoom_in_n_clicks, zoom_out_n_clicks):
+            ctx = dash.callback_context
+            zoom_in_clicked = ctx.triggered[0]['prop_id'] == 'zoom-in-button.n_clicks'
+            zoom_out_clicked = ctx.triggered[0]['prop_id'] == 'zoom-out-button.n_clicks'
+
+            if self.data is not None:
+                filtered_data = self.data.iloc[selected_range[0]:selected_range[1]]
+
+                # Create a candlestick chart
+                fig = go.Figure(data=[go.Candlestick(
+                    x=filtered_data.index,
+                    open=filtered_data['1. open'],
+                    high=filtered_data['2. high'],
+                    low=filtered_data['3. low'],
+                    close=filtered_data['4. close'],
+                    increasing_line_color= 'cyan', decreasing_line_color= 'gray'
+                )])
+
+                # Add a line chart for volatility
+                fig.add_trace(go.Scatter(
+                    x=filtered_data.index,
+                    y=filtered_data['volatility'],
+                    mode='lines',
+                    line=dict(width=1.5),
+                    name='Volatility'
+                ))
+
+                fig.update_layout(
+                    title='Daily Close Prices and Volatility',
+                    yaxis_title='Volatility',
+                    yaxis2=dict(title='Price', overlaying='y', side='left'),
+                    xaxis=dict(rangeslider=dict(visible=False)),
+                    yaxis2_range = [min(filtered_data['4. close']), max(filtered_data['4. close'])],
+                    yaxis_range = [min(filtered_data['volatility']), max(filtered_data['volatility'])],
+                )
+
+                # Handle zoom
+                if zoom_in_clicked or zoom_out_clicked:
+                    range_len = selected_range[1] - selected_range[0]
+                    range_mid = selected_range[0] + range_len / 2
+                    if zoom_in_clicked:
+                        new_range = [int(range_mid - self.zoom_factor * range_len / 2),
+                                     int(range_mid + self.zoom_factor * range_len / 2)]
+                    else:  # zoom_out_clicked
+                        new_range = [max(0, int(range_mid - (1 + self.zoom_factor) * range_len / 2)),
+                                     min(len(self.data), int(range_mid + (1 + self.zoom_factor) * range_len / 2))]
+                    return fig, len(self.data.index), new_range
+
+                return fig, len(self.data.index), [0, len(self.data.index)]
+            
+            return go.Figure(), 100, [0, 100]
+        
     
-    return pdr.DataReader(name=ticker, data_source=period, start=start, end=end, api_key=key)
-    
+    def get_stock_data(self, symbol, period, api_key):
+        ts = TimeSeries(key=api_key, output_format='pandas')
 
-def get_history_and_plot(ticker, period, start, end, key):
-    """
-     Get AAPL history and plot it. This is a wrapper for get_history that creates a plot and returns the plot
-     
-     @param ticker - ticker to get history for
-     @param period - period of the history ( must be between start and end )
-     @param start - start date of the history ( must be between start and end )
-     @param end - end date of the history ( must be between start and end )
-     @param key - key to use for key generation ( str )
-     
-     @return pandas DataFrame with open high low close as columns and candlestick as rows. Each row is a column of the
-    """
-    data = get_history(ticker, period, start, end, key)
-    
-    fig = go.Figure()
+        data = None
+        match period:
+            case 'daily':
+                data, metadata = ts.get_daily(symbol=symbol, outputsize='full')
+            case 'daily_adjusted':
+                data, metadata = ts.get_daily_adjusted(symbol=symbol, outputsize='full')
 
-    fig = go.Figure(data=[go.Candlestick(
-        x=data.index,
-        open=data['open'],
-        high=data['high'],
-        low=data['low'],
-        close=data['close'],
-        increasing_line_color= 'cyan', decreasing_line_color= 'gray'
-    )])
+        if data is not None:
+            data['return'] = data['4. close'].pct_change()
+            data['volatility'] = data['return'].rolling(21).std() * np.sqrt(252)  # annualized volatility
 
-    fig.update_layout(
-        xaxis_rangeslider_visible=True,
-        title='AAPL : Prix à la fermeture par jour',
-        yaxis_title='AAPL Stock',
-    )
-
-    fig.show()
-    
-    return data
+        self.data = data
+        self.app.layout.children[1].children[0].max = len(data.index)
+        self.app.layout.children[1].children[0].value = [0, len(data.index)]
+        return data
 
 
-def get_history_plot(ticker, period, key):
-    """
-     Get history plot for ticker. This function is used to plot historical trading data for a given ticker
-     
-     @param ticker - ticker to get data for
-     @param period - period to get data for e. g.
-     @param key - time series key to use
-     
-     @return subplots of candlestick plot with data
-    """
-    ts = TimeSeries(key=key, output_format='pandas')
-
-    match period:
-        case 'av-daily-adjusted':
-            data, metadata = ts.get_daily_adjusted(symbol=ticker, outputsize='full')
-        case 'av-daily':
-            data, metadata = ts.get_daily(symbol=ticker, outputsize='full')
-
-    data['return'] = data['4. close'].pct_change()
-    data['volatility'] = data['return'].rolling(21).std()
-
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                        vertical_spacing=0.02)
-
-    fig.add_trace(go.Candlestick(
-        x=data.index,
-        open=data['1. open'],
-        high=data['2. high'],
-        low=data['3. low'],
-        close=data['4. close'],
-        increasing_line_color= 'cyan', decreasing_line_color= 'gray',
-        name='AAPL'
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=data.index, 
-        y=data['volatility'], 
-        mode='lines', 
-        line=dict(width=1.5),
-        name='Volatility'
-    ), row=2, col=1)
-
-    fig.update_layout(
-        xaxis_rangeslider_visible=True,
-        title='AAPL : Daily Close Prices and Volatility',
-    )
-
-    fig.show()
-    return data
+    def show(self):
+        self.app.run_server(mode='inline')
